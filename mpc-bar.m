@@ -20,15 +20,16 @@
 #include "mpc/song_format.h"
 
 #include <assert.h>
-#include <lua/lauxlib.h>
-#include <lua/lua.h>
-#include <lua/lualib.h>
+#include <lauxlib.h>
+#include <lua.h>
+#include <lualib.h>
 #include <mpd/client.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #import <Cocoa/Cocoa.h>
+#import <MediaPlayer/MediaPlayer.h>
 
 #define VERSION "0.5.0"
 #define TITLE_MAX_LENGTH 96
@@ -332,6 +333,8 @@ static int handler(void *userdata, const char *section, const char *name,
   [clearItem setEnabled:(queue_length > 0)];
   [updateDatabaseItem setEnabled:YES];
 
+  [self updateNowPlayingInfoWithStatus:status song:song];
+
 cleanup:
   if (song)
     mpd_song_free(song);
@@ -340,6 +343,65 @@ cleanup:
 
   if (errorMsg)
     [self showError:errorMsg];
+}
+- (void)updateNowPlayingInfoWithStatus:(struct mpd_status *)status song:(struct mpd_song *)song {
+  // Clear Now Playing when disconnected or no status
+  if (!connection || !status) {
+    MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = nil;
+    return;
+  }
+
+  enum mpd_state state = mpd_status_get_state(status);
+  bool active = (state == MPD_STATE_PLAY || state == MPD_STATE_PAUSE);
+
+  // Clear Now Playing when stopped/inactive or no current song
+  if (!active || !song) {
+    MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = nil;
+    return;
+  }
+
+  // Extract metadata from MPD song
+  const char *title_raw = mpd_song_get_tag(song, MPD_TAG_TITLE, 0);
+  const char *artist_raw = mpd_song_get_tag(song, MPD_TAG_ARTIST, 0);
+  const char *album_raw = mpd_song_get_tag(song, MPD_TAG_ALBUM, 0);
+  const char *name_raw = mpd_song_get_tag(song, MPD_TAG_NAME, 0);
+
+  // Fallback strategy: use stream name if title is missing, or URI as last resort
+  NSString *title = title_raw ? utf8String(title_raw)
+                              : (name_raw ? utf8String(name_raw)
+                                          : utf8String(mpd_song_get_uri(song)));
+  NSString *artist = artist_raw ? utf8String(artist_raw) : @"";
+  NSString *album = album_raw ? utf8String(album_raw) : @"";
+
+  // Get timing information
+  unsigned int elapsed = mpd_status_get_elapsed_time(status);
+  unsigned int duration = mpd_song_get_duration(song);
+
+  // Build Now Playing info dictionary
+  NSMutableDictionary *nowPlayingInfo = [NSMutableDictionary dictionary];
+
+  nowPlayingInfo[MPMediaItemPropertyTitle] = title;
+  if ([artist length] > 0) {
+    nowPlayingInfo[MPMediaItemPropertyArtist] = artist;
+  }
+  if ([album length] > 0) {
+    nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = album;
+  }
+
+  // Set playback rate: 1.0 for playing, 0.0 for paused
+  nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] =
+    @(state == MPD_STATE_PLAY ? 1.0 : 0.0);
+
+  // Set elapsed time
+  nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = @(elapsed);
+
+  // Set duration if available (0 means unknown/stream)
+  if (duration > 0) {
+    nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = @(duration);
+  }
+
+  // Update Now Playing Info Center
+  MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = nowPlayingInfo;
 }
 - (NSMenuItem *)addControlMenuItemWithTitle:(NSString *)title
                                       image:(NSImage *)image
@@ -407,6 +469,69 @@ cleanup:
   [item setMenu:controlMenu];
   [self updateControlMenu];
   [self updateStatus];
+}
+- (void)initRemoteCommandCenter {
+  MPRemoteCommandCenter *commandCenter = MPRemoteCommandCenter.sharedCommandCenter;
+
+  // Play command
+  [commandCenter.playCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event) {
+    [self play];
+    return MPRemoteCommandHandlerStatusSuccess;
+  }];
+
+  // Pause command
+  [commandCenter.pauseCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event) {
+    [self pause];
+    return MPRemoteCommandHandlerStatusSuccess;
+  }];
+
+  // Toggle play/pause (for unified play/pause buttons)
+  [commandCenter.togglePlayPauseCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event) {
+    if (!self->connection) {
+      return MPRemoteCommandHandlerStatusNoActionableNowPlayingItem;
+    }
+
+    struct mpd_status *status = mpd_run_status(self->connection);
+    if (!status) {
+      return MPRemoteCommandHandlerStatusNoActionableNowPlayingItem;
+    }
+
+    enum mpd_state state = mpd_status_get_state(status);
+    mpd_status_free(status);
+
+    if (state == MPD_STATE_PLAY) {
+      [self pause];
+    } else {
+      [self play];
+    }
+    return MPRemoteCommandHandlerStatusSuccess;
+  }];
+
+  // Next track command
+  [commandCenter.nextTrackCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event) {
+    [self next];
+    return MPRemoteCommandHandlerStatusSuccess;
+  }];
+
+  // Previous track command
+  [commandCenter.previousTrackCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event) {
+    [self previous];
+    return MPRemoteCommandHandlerStatusSuccess;
+  }];
+
+  // Stop command
+  [commandCenter.stopCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event) {
+    [self stop];
+    return MPRemoteCommandHandlerStatusSuccess;
+  }];
+
+  // Enable commands
+  commandCenter.playCommand.enabled = YES;
+  commandCenter.pauseCommand.enabled = YES;
+  commandCenter.togglePlayPauseCommand.enabled = YES;
+  commandCenter.nextTrackCommand.enabled = YES;
+  commandCenter.previousTrackCommand.enabled = YES;
+  commandCenter.stopCommand.enabled = YES;
 }
 - (void)initSongMenu {
   songMap = [NSMapTable new];
@@ -480,6 +605,7 @@ cleanup:
     [self connect];
     [self initSongMenu];
     [self initControlMenu];
+    [self initRemoteCommandCenter];
 
     [[[NSThread alloc] initWithTarget:self
                              selector:@selector(updateLoop)
@@ -554,6 +680,16 @@ cleanup:
   [timeItem
       setTitle:[NSString stringWithFormat:@"%@ / %@", formatTime(elapsed),
                                           (dur > 0) ? formatTime(dur) : @"?"]];
+
+  // Update Now Playing elapsed time if we're playing
+  if (state == MPD_STATE_PLAY) {
+    NSMutableDictionary *nowPlayingInfo =
+      [MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo mutableCopy];
+    if (nowPlayingInfo) {
+      nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = @(elapsed);
+      MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = nowPlayingInfo;
+    }
+  }
 
   if ([controlMenu indexOfItem:timeItem] < 0)
     [controlMenu insertItem:timeItem atIndex:0];

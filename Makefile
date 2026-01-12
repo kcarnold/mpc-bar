@@ -1,6 +1,6 @@
 TARGET = mpc-bar
-CFLAGS = -O2 -fobjc-arc -Wall
-LDFLAGS = -lmpdclient -llua -framework Cocoa
+CFLAGS = -O2 -fobjc-arc -Wall $(shell pkg-config --cflags libmpdclient lua)
+LDFLAGS = $(shell pkg-config --libs libmpdclient lua) -framework Cocoa -framework MediaPlayer
 OUTPUT_OPTION=-MMD -MP -o $@
 BINDIR = /usr/local/bin
 

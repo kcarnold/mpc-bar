@@ -136,12 +136,35 @@ static int handler(void *userdata, const char *section, const char *name,
     luaL_openlibs(L);
     luaFilterPath = [[utf8String(config.lua_filter) stringByStandardizingPath]
         cStringUsingEncoding:NSUTF8StringEncoding];
+
+    // Load the Lua script once at initialization
+    if (luaL_dofile(L, luaFilterPath) != LUA_OK) {
+      NSLog(@"Failed to load Lua filter: %s", lua_tostring(L, -1));
+      lua_close(L);
+      L = NULL;
+      return;
+    }
+
+    // Verify the filter function exists
+    lua_getglobal(L, "filter");
+    if (!lua_isfunction(L, -1)) {
+      NSLog(@"Lua filter script must define a 'filter' function");
+      lua_close(L);
+      L = NULL;
+      return;
+    }
+    lua_pop(L, 1);  // Remove function from stack, leaving it in global namespace
   }
 }
 - (const char *)runLuaFilterOn:(const char *)s {
-  if (luaL_dofile(L, luaFilterPath) != LUA_OK) {
+  // L will be NULL if initialization failed or no filter configured
+  if (!L) {
     return s;
   }
+
+  // Clean up any previous results on the stack
+  lua_settop(L, 0);
+
   lua_getglobal(L, "filter");
   if (!lua_isfunction(L, -1)) {
     return s;
@@ -150,6 +173,7 @@ static int handler(void *userdata, const char *section, const char *name,
   if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
     return s;
   }
+  // Return pointer to string on stack (caller must copy immediately)
   return lua_tostring(L, -1);
 }
 - (void)connect {

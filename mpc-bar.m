@@ -104,6 +104,7 @@ static int handler(void *userdata, const char *section, const char *name,
 
   lua_State *L;
   const char *luaFilterPath;
+  NSString *luaFilterContent;
 }
 - (void)initConfig {
   config.host = "localhost";
@@ -130,36 +131,69 @@ static int handler(void *userdata, const char *section, const char *name,
     config.show_queue_idle = config.show_queue;
   }
 }
+- (BOOL)loadLuaFilter {
+  // Read the current file content
+  NSString *path = [NSString stringWithUTF8String:luaFilterPath];
+  NSError *error = nil;
+  NSString *content = [NSString stringWithContentsOfFile:path
+                                                encoding:NSUTF8StringEncoding
+                                                   error:&error];
+  if (!content) {
+    NSLog(@"Failed to read Lua filter file: %@", error);
+    return NO;
+  }
+
+  // Load or reload the Lua filter script
+  if (luaL_dofile(L, luaFilterPath) != LUA_OK) {
+    NSLog(@"Failed to load Lua filter: %s", lua_tostring(L, -1));
+    return NO;
+  }
+
+  // Verify the filter function exists
+  lua_getglobal(L, "filter");
+  if (!lua_isfunction(L, -1)) {
+    NSLog(@"Lua filter script must define a 'filter' function");
+    lua_pop(L, 1);
+    return NO;
+  }
+  lua_pop(L, 1);  // Remove function from stack, leaving it in global namespace
+
+  // Store the content for comparison next time
+  luaFilterContent = content;
+
+  return YES;
+}
 - (void)initLua {
   if (config.lua_filter) {
     L = luaL_newstate();
     luaL_openlibs(L);
     luaFilterPath = [[utf8String(config.lua_filter) stringByStandardizingPath]
         cStringUsingEncoding:NSUTF8StringEncoding];
+    luaFilterContent = nil;
 
     // Load the Lua script once at initialization
-    if (luaL_dofile(L, luaFilterPath) != LUA_OK) {
-      NSLog(@"Failed to load Lua filter: %s", lua_tostring(L, -1));
+    if (![self loadLuaFilter]) {
       lua_close(L);
       L = NULL;
-      return;
     }
-
-    // Verify the filter function exists
-    lua_getglobal(L, "filter");
-    if (!lua_isfunction(L, -1)) {
-      NSLog(@"Lua filter script must define a 'filter' function");
-      lua_close(L);
-      L = NULL;
-      return;
-    }
-    lua_pop(L, 1);  // Remove function from stack, leaving it in global namespace
   }
 }
 - (const char *)runLuaFilterOn:(const char *)s {
   // L will be NULL if initialization failed or no filter configured
   if (!L) {
     return s;
+  }
+
+  // Check if the file content has changed
+  NSString *path = [NSString stringWithUTF8String:luaFilterPath];
+  NSString *currentContent = [NSString stringWithContentsOfFile:path
+                                                       encoding:NSUTF8StringEncoding
+                                                          error:nil];
+
+  // Reload if content changed
+  if (currentContent && ![currentContent isEqualToString:luaFilterContent]) {
+    NSLog(@"Lua filter file changed, reloading...");
+    [self loadLuaFilter];
   }
 
   // Clean up any previous results on the stack

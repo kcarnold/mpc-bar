@@ -33,7 +33,7 @@
 
 #define VERSION "0.5.0"
 #define TITLE_MAX_LENGTH 96
-#define SLEEP_INTERVAL 0.2
+#define SLEEP_INTERVAL 0.5
 
 static NSString *utf8String(const char *s) {
   return [NSString stringWithCString:s encoding:NSUTF8StringEncoding];

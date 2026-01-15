@@ -31,6 +31,8 @@ idle_message = No song playing
 show_queue = true                       # Show queue/position info while playing? (true/false)
 show_queue_idle = (value of show_queue) # Show queue/position info while idle? (true/false)
 # lua_filter = ~/.mpc-bar-filter.lua    # Path to a Lua filter script
+# title_max_length = 96                 # Maximum length of the displayed title
+# sleep_interval = 0.5                  # Time (in seconds) between status updates
 ```
 
 ## Lua filter

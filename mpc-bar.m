@@ -31,9 +31,7 @@
 #import <Cocoa/Cocoa.h>
 #import <MediaPlayer/MediaPlayer.h>
 
-#define VERSION "0.5.0"
-#define TITLE_MAX_LENGTH 96
-#define SLEEP_INTERVAL 0.5
+#define VERSION "0.7.0"
 
 static NSString *utf8String(const char *s) {
   return [NSString stringWithCString:s encoding:NSUTF8StringEncoding];
@@ -53,6 +51,8 @@ struct config {
   const char *host, *password, *format, *idle_message, *lua_filter;
   int show_queue, show_queue_idle;
   unsigned port;
+  unsigned title_max_length;
+  double sleep_interval;
 };
 
 static int handler(void *userdata, const char *section, const char *name,
@@ -75,6 +75,10 @@ static int handler(void *userdata, const char *section, const char *name,
     c->show_queue_idle = (strcmp(value, "false") != 0);
   } else if (MATCH("display", "lua_filter")) {
     c->lua_filter = strdup(value);
+  } else if (MATCH("display", "title_max_length")) {
+    c->title_max_length = atoi(value);
+  } else if (MATCH("display", "sleep_interval")) {
+    c->sleep_interval = atof(value);
   } else {
     return 0;
   }
@@ -116,6 +120,8 @@ static int handler(void *userdata, const char *section, const char *name,
   config.idle_message = "No song playing";
   config.show_queue = 1;
   config.show_queue_idle = -1;
+  config.title_max_length = 96;
+  config.sleep_interval = 0.2;
 }
 - (BOOL)tryReadConfigFile:(NSString *)file {
   return (0 == ini_parse([[NSHomeDirectory()
@@ -248,7 +254,7 @@ static int handler(void *userdata, const char *section, const char *name,
 }
 - (void)updateLoop {
   for (;;) {
-    [NSThread sleepForTimeInterval:SLEEP_INTERVAL];
+    [NSThread sleepForTimeInterval:config.sleep_interval];
     if (!connection) {
       [self disableAllItems];
       [self showError:errorMessage];
@@ -349,9 +355,9 @@ static int handler(void *userdata, const char *section, const char *name,
       [output appendFormat:@" (%u/%u)", song_pos + 1, queue_length];
   }
 
-  if ([output length] > TITLE_MAX_LENGTH) {
-    int leftCount = (TITLE_MAX_LENGTH - 3) / 2;
-    int rightCount = TITLE_MAX_LENGTH - leftCount - 3;
+  if ([output length] > config.title_max_length) {
+    int leftCount = (config.title_max_length - 3) / 2;
+    int rightCount = config.title_max_length - leftCount - 3;
     [menuButton setTitle:[@[
                   [output substringToIndex:leftCount],
                   [output substringFromIndex:[output length] - rightCount]

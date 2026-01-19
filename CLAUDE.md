@@ -39,8 +39,8 @@ Required libraries (linked via LDFLAGS):
 
 **Configuration** (ini.c/ini.h):
 - Uses the inih library to parse `~/.mpc-bar.ini` (or fallback `~/.mpcbar`)
-- Config handler in mpc-bar.m:57-82 processes connection and display settings
-- Supports MPD host, port, password, display format strings, and Lua filter scripts
+- Config handler in mpc-bar.m:57-84 processes connection and display settings
+- Supports MPD host, port, password, display format strings, title display options, and Lua filter scripts
 
 **Song Formatting** (mpc/ directory):
 - Imported from the MPC project for consistent formatting behavior
@@ -114,6 +114,8 @@ idle_message = No song playing
 show_queue = true
 show_queue_idle = <defaults to show_queue value>
 show_title_on_bar = true  # Show song title on menu bar (default: true)
+title_max_length = 96  # Maximum title length before truncation (default: 96)
+sleep_interval = 0.2  # Update loop sleep interval in seconds (default: 0.2)
 lua_filter = <path to .lua file>
 ```
 

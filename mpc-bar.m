@@ -49,7 +49,7 @@ static NSString *formatTime(unsigned int t) {
 
 struct config {
   const char *host, *password, *format, *idle_message, *lua_filter;
-  int show_queue, show_queue_idle;
+  int show_queue, show_queue_idle, show_title_on_bar;
   unsigned port;
   unsigned title_max_length;
   double sleep_interval;
@@ -73,6 +73,8 @@ static int handler(void *userdata, const char *section, const char *name,
     c->show_queue = (strcmp(value, "false") != 0);
   } else if (MATCH("display", "show_queue_idle")) {
     c->show_queue_idle = (strcmp(value, "false") != 0);
+  } else if (MATCH("display", "show_title_on_bar")) {
+    c->show_title_on_bar = (strcmp(value, "false") != 0);
   } else if (MATCH("display", "lua_filter")) {
     c->lua_filter = strdup(value);
   } else if (MATCH("display", "title_max_length")) {
@@ -96,7 +98,7 @@ static int handler(void *userdata, const char *section, const char *name,
 
   NSString *errorMessage;
   NSMenu *controlMenu;
-  NSMenuItem *timeItem, *timeSeparator, *playPauseItem, *stopItem, *nextItem,
+  NSMenuItem *titleItem, *timeItem, *timeSeparator, *playPauseItem, *stopItem, *nextItem,
       *previousItem, *singleItem, *clearItem, *updateDatabaseItem,
       *addToQueueItem;
   NSImage *playImage, *pauseImage, *stopImage, *nextImage, *previousImage,
@@ -120,6 +122,7 @@ static int handler(void *userdata, const char *section, const char *name,
   config.idle_message = "No song playing";
   config.show_queue = 1;
   config.show_queue_idle = -1;
+  config.show_title_on_bar = 1;
   config.title_max_length = 96;
   config.sleep_interval = 0.2;
 }
@@ -297,6 +300,7 @@ static int handler(void *userdata, const char *section, const char *name,
   struct mpd_status *status = NULL;
   struct mpd_song *song = NULL;
   NSString *errorMsg = nil;
+  NSString *displayTitle = nil;
 
   NSMutableString *output = [NSMutableString new];
 
@@ -328,8 +332,10 @@ static int handler(void *userdata, const char *section, const char *name,
     else if (state == MPD_STATE_PLAY &&
              (single == MPD_SINGLE_ON || single == MPD_SINGLE_ONESHOT))
       [menuButton setImage:singleImage];
-    else
+    else if (config.show_title_on_bar)
       [menuButton setImage:nil];
+    else
+      [menuButton setImage:playImage];
 
     char *s = format_song(song, config.format);
     if (L) {
@@ -342,7 +348,10 @@ static int handler(void *userdata, const char *section, const char *name,
     // FIXME: There's no point calling utf8String more than once, as
     // idle_message never changes.
     [output setString:utf8String(config.idle_message)];
-    [menuButton setImage:nil];
+    if (config.show_title_on_bar)
+      [menuButton setImage:nil];
+    else
+      [menuButton setImage:stopImage];
   }
 
   int song_pos = mpd_status_get_song_pos(status);
@@ -358,12 +367,23 @@ static int handler(void *userdata, const char *section, const char *name,
   if ([output length] > config.title_max_length) {
     int leftCount = (config.title_max_length - 3) / 2;
     int rightCount = config.title_max_length - leftCount - 3;
-    [menuButton setTitle:[@[
+    displayTitle = [@[
                   [output substringToIndex:leftCount],
                   [output substringFromIndex:[output length] - rightCount]
-                ] componentsJoinedByString:@"..."]];
-  } else
-    [menuButton setTitle:output];
+                ] componentsJoinedByString:@"..."];
+  } else {
+    displayTitle = output;
+  }
+
+  // Always show title in dropdown menu
+  [titleItem setTitle:displayTitle];
+
+  // Conditionally show title on menu bar
+  if (config.show_title_on_bar) {
+    [menuButton setTitle:displayTitle];
+  } else {
+    [menuButton setTitle:@""];
+  }
 
   if (state == MPD_STATE_PLAY) {
     [playPauseItem setTitle:@"Pause"];
@@ -493,6 +513,10 @@ cleanup:
   previousImage = ICON("backward.fill", "Previous");
   singleImage = ICON("playpause.fill", "Single");
   clearImage = ICON("clear.fill", "Clear");
+
+  titleItem = [NSMenuItem new];
+  [titleItem setEnabled:NO];
+  [controlMenu insertItem:titleItem atIndex:0];
 
   timeItem = [NSMenuItem new];
   [timeItem setEnabled:NO];

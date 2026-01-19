@@ -31,7 +31,7 @@
 #import <Cocoa/Cocoa.h>
 #import <MediaPlayer/MediaPlayer.h>
 
-#define VERSION "0.7.0"
+#define VERSION "0.8.0"
 
 static NSString *utf8String(const char *s) {
   return [NSString stringWithCString:s encoding:NSUTF8StringEncoding];
